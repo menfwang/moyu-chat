@@ -9,7 +9,7 @@ npm-debug.log*
 Thumbs.db
 *.tsbuildinfo
 .npm-cache/
-.cdp-profile/
+.cdp-profile*/
 .tmole-home/
 pinggy.log
 preview-*.png

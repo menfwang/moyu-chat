@@ -17,8 +17,36 @@ const DIST_DIR = path.join(ROOT, 'dist');
 const PORT = Number.parseInt(process.env.PORT ?? '8787', 10);
 const HOST = process.env.HOST ?? '0.0.0.0';
 
-const API_KEY = (process.env.DEEPSEEK_API_KEY ?? '').trim();
-const API_BASE = (process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com').replace(/\/+$/, '');
+type Provider = 'openai' | 'anthropic';
+type ModelOption = {
+  id: string;
+  name: string;
+  description: string;
+  tag: string;
+  reasoning: boolean;
+};
+
+const PROVIDER: Provider =
+  (process.env.AI_PROVIDER ?? (process.env.ANTHROPIC_BASE_URL ? 'anthropic' : 'openai')).toLowerCase() ===
+  'anthropic'
+    ? 'anthropic'
+    : 'openai';
+
+const API_KEY = (
+  PROVIDER === 'anthropic'
+    ? (process.env.ANTHROPIC_API_KEY ??
+      process.env.ANTHROPIC_AUTH_TOKEN ??
+      process.env.DEEPSEEK_API_KEY ??
+      '')
+    : (process.env.DEEPSEEK_API_KEY ?? '')
+).trim();
+
+const API_BASE = (
+  PROVIDER === 'anthropic'
+    ? (process.env.ANTHROPIC_BASE_URL ?? 'https://api.deepseek.com/anthropic')
+    : (process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com')
+).replace(/\/+$/, '');
+
 const DEMO_SETTING = (process.env.DEMO_MODE ?? 'auto').toLowerCase();
 const DEMO_PROVIDER = (process.env.DEMO_PROVIDER ?? 'local').toLowerCase();
 const IS_DEMO = DEMO_SETTING === 'on' || DEMO_SETTING === 'true' || (DEMO_SETTING === 'auto' && !API_KEY);
@@ -29,25 +57,55 @@ const UPSTREAM_TIMEOUT_MS = Number.parseInt(process.env.UPSTREAM_TIMEOUT_MS ?? '
 const RATE_PER_MINUTE = Number.parseInt(process.env.RATE_LIMIT_PER_MINUTE ?? '12', 10);
 const RATE_PER_DAY = Number.parseInt(process.env.RATE_LIMIT_PER_DAY ?? '240', 10);
 
-const MODEL_OPTIONS = [
-  {
-    id: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
-    name: '轻语',
-    description: '快速、均衡，适合日常对话',
-    tag: 'DeepSeek Chat',
-  },
-  ...(process.env.ENABLE_REASONER === 'false'
-    ? []
+const SHOW_SECOND_MODEL =
+  process.env.ENABLE_SECOND_MODEL !== 'false' && process.env.ENABLE_REASONER !== 'false';
+
+const MODEL_OPTIONS: ModelOption[] =
+  PROVIDER === 'anthropic'
+    ? [
+        {
+          id: process.env.ANTHROPIC_MODEL ?? 'deepseek-v4-pro',
+          name: process.env.ANTHROPIC_MODEL_NAME?.trim() || 'V4 Pro',
+          description: '旗舰模型，推理更充分，适合复杂问题',
+          tag: 'DeepSeek V4',
+          reasoning: true,
+        },
+        ...(SHOW_SECOND_MODEL
+          ? [
+              {
+                id: process.env.ANTHROPIC_FAST_MODEL ?? 'deepseek-flash',
+                name: process.env.ANTHROPIC_FAST_MODEL_NAME?.trim() || 'V4.1 Flash',
+                description: '响应更快，适合日常对话',
+                tag: 'DeepSeek Flash',
+                reasoning: true,
+              },
+            ]
+          : []),
+      ]
     : [
         {
-          id: process.env.DEEPSEEK_REASONER_MODEL ?? 'deepseek-reasoner',
-          name: '深思',
-          description: '先推理再回答，适合复杂问题',
-          tag: 'DeepSeek Reasoner',
+          id: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
+          name: '轻语',
+          description: '快速、均衡，适合日常对话',
+          tag: 'DeepSeek Chat',
+          reasoning: false,
         },
-      ]),
-];
+        ...(SHOW_SECOND_MODEL
+          ? [
+              {
+                id: process.env.DEEPSEEK_REASONER_MODEL ?? 'deepseek-reasoner',
+                name: '深思',
+                description: '先推理再回答，适合复杂问题',
+                tag: 'DeepSeek Reasoner',
+                reasoning: true,
+              },
+            ]
+          : []),
+      ];
 const MODEL_IDS = new Set(MODEL_OPTIONS.map((model) => model.id));
+const REASONING_MODELS = new Set(
+  MODEL_OPTIONS.filter((model) => model.reasoning).map((model) => model.id),
+);
 
 const BASE_SYSTEM_PROMPT =
   process.env.SYSTEM_PROMPT?.trim() ||
@@ -135,7 +193,7 @@ function parseChatRequest(body: unknown): {
   const model = MODEL_IDS.has(requestedModel) ? requestedModel : MODEL_OPTIONS[0]!.id;
 
   const requestedTemperature = typeof body.temperature === 'number' ? body.temperature : 0.7;
-  const temperature = Math.min(1.5, Math.max(0, requestedTemperature));
+  const temperature = Math.min(PROVIDER === 'anthropic' ? 1 : 1.5, Math.max(0, requestedTemperature));
 
   const tone: Tone =
     body.tone === 'concise' || body.tone === 'detailed' || body.tone === 'balanced'
@@ -147,6 +205,30 @@ function parseChatRequest(body: unknown): {
 
 function buildSystemMessage(tone: Tone): string {
   return `${BASE_SYSTEM_PROMPT}\n${TONE_PROMPTS[tone] ?? TONE_PROMPTS.balanced}`;
+}
+
+function anthropicMessagesUrl(base: string): string {
+  const clean = base.replace(/\/+$/, '');
+  return /\/v1$/i.test(clean) ? `${clean}/messages` : `${clean}/v1/messages`;
+}
+
+/**
+ * The Anthropic Messages API expects strictly alternating user/assistant turns.
+ * A regenerate or a stopped stream can leave two adjacent turns in our history,
+ * so merge them before forwarding.
+ */
+function toAnthropicMessages(messages: ChatMessage[]): ChatMessage[] {
+  const merged: ChatMessage[] = [];
+  for (const message of messages) {
+    const last = merged[merged.length - 1];
+    if (last?.role === message.role) {
+      last.content = `${last.content}\n\n${message.content}`;
+    } else {
+      merged.push({ ...message });
+    }
+  }
+  while (merged[0]?.role === 'assistant') merged.shift();
+  return merged;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -262,6 +344,116 @@ async function pipeOpenAiStream(params: {
   }
 }
 
+async function pipeAnthropicStream(params: {
+  url: string;
+  apiKey: string;
+  body: Record<string, unknown>;
+  res: Response;
+  signal: AbortSignal;
+  providerName: string;
+}) {
+  const { url, apiKey, body, res, signal, providerName } = params;
+
+  const upstream = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      'anthropic-version': '2023-06-01',
+      'x-api-key': apiKey,
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(body),
+    signal,
+  }).catch((error: unknown) => {
+    if (signal.aborted) throw error;
+    console.error(`[${providerName}] network error`, error instanceof Error ? error.message : error);
+    throw new UpstreamError('无法连接模型服务，请稍后重试。', 502);
+  });
+
+  if (!upstream.ok || !upstream.body) {
+    const detail = await upstream.text().catch(() => '');
+    console.error(`[${providerName}] upstream ${upstream.status}: ${detail.slice(0, 500)}`);
+    throw new UpstreamError(friendlyUpstreamMessage(upstream.status), upstream.status === 429 ? 429 : 502);
+  }
+
+  const stopHeartbeat = startEventStream(res);
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finished = false;
+
+  const handleFrame = (frame: string) => {
+    const data = frame
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart())
+      .join('\n');
+    if (!data) return;
+    if (data === '[DONE]') {
+      finished = true;
+      return;
+    }
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (!isRecord(payload)) return;
+
+    if (payload.type === 'error') {
+      const detail = isRecord(payload.error) ? payload.error.message : '';
+      console.error(
+        `[${providerName}] stream error: ${typeof detail === 'string' ? detail.slice(0, 300) : ''}`,
+      );
+      throw new UpstreamError('模型生成过程中出现错误，请重试。');
+    }
+
+    if (payload.type === 'content_block_start' && isRecord(payload.content_block)) {
+      const block = payload.content_block;
+      if (block.type === 'text' && typeof block.text === 'string' && block.text) {
+        sse(res, { type: 'delta', text: block.text });
+      }
+      if (block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking) {
+        sse(res, { type: 'reasoning', text: block.thinking });
+      }
+      return;
+    }
+
+    if (payload.type === 'content_block_delta' && isRecord(payload.delta)) {
+      const delta = payload.delta;
+      if (delta.type === 'text_delta' && typeof delta.text === 'string' && delta.text) {
+        sse(res, { type: 'delta', text: delta.text });
+      } else if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking) {
+        sse(res, { type: 'reasoning', text: delta.thinking });
+      }
+      return;
+    }
+
+    if (payload.type === 'message_stop') finished = true;
+  };
+
+  try {
+    while (!finished) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop() ?? '';
+      for (const frame of frames) handleFrame(frame);
+    }
+
+    if (buffer.trim() && !finished) handleFrame(buffer);
+    sse(res, { type: 'done' });
+  } finally {
+    stopHeartbeat();
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
 function localDemoText(messages: ChatMessage[], tone: Tone): string {
   const latest = messages[messages.length - 1]?.content ?? '';
   const short = latest.replace(/\s+/g, ' ').slice(0, 80);
@@ -273,7 +465,7 @@ function localDemoText(messages: ChatMessage[], tone: Tone): string {
       '',
       '当前页面运行在**演示模式**：界面、流式输出和对话记录都可以正常体验，但回答由本地示例生成，并不是真实的大模型推理。',
       '',
-      '要让墨语真正回答问题，只需在服务器环境变量中配置 `DEEPSEEK_API_KEY`，然后重启服务即可。',
+      '要让墨语真正回答问题，只需在服务器环境变量中配置模型 API Key，然后重启服务即可。',
       ...(compact ? [] : ['', '你可以在部署平台的环境变量面板中添加它，密钥不会发送到浏览器。']),
     ].join('\n');
   }
@@ -282,14 +474,14 @@ function localDemoText(messages: ChatMessage[], tone: Tone): string {
     `我收到了你的消息：**${short}${latest.length > short.length ? '…' : ''}**`,
     '',
     ...(compact
-      ? ['当前是演示模式，尚未连接真实模型。配置 `DEEPSEEK_API_KEY` 后即可获得完整回答。']
+      ? ['当前是演示模式，尚未连接真实模型。配置模型 API Key 后即可获得完整回答。']
       : [
           '这是一个演示回复，说明聊天界面已经正常工作：消息会流式出现，Markdown 会正确渲染，对话也会保存在当前浏览器中。',
           '',
           '### 启用真实 AI',
           '',
           '1. 在 [DeepSeek 开放平台](https://platform.deepseek.com/) 创建 API Key。',
-          '2. 在部署平台添加环境变量 `DEEPSEEK_API_KEY`。',
+          '2. 在部署平台添加环境变量 `ANTHROPIC_API_KEY`（或 `DEEPSEEK_API_KEY`）。',
           '3. 重新部署或重启服务，页面右上角会显示「在线」。',
           '',
           '> 服务端代理会保护密钥，浏览器端永远看不到它。',
@@ -381,6 +573,7 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     mode: IS_DEMO ? 'demo' : 'live',
+    provider: PROVIDER,
     model: MODEL_OPTIONS[0]?.id ?? null,
     uptime: Math.round(process.uptime()),
   });
@@ -390,6 +583,7 @@ app.get('/api/config', (_req, res) => {
   res.json({
     demo: IS_DEMO,
     demoProvider: IS_DEMO ? (DEMO_PROVIDER === 'pollinations' ? 'pollinations' : 'local') : null,
+    provider: PROVIDER,
     models: MODEL_OPTIONS,
     defaultModel: MODEL_OPTIONS[0]!.id,
     maxInputChars: MAX_INPUT_CHARS,
@@ -445,6 +639,30 @@ app.post('/api/chat', publicLimiter, dailyLimiter, async (req: Request, res: Res
       return;
     }
 
+    if (PROVIDER === 'anthropic') {
+      const anthropicMessages = toAnthropicMessages(parsed.messages);
+      if (anthropicMessages.length === 0) {
+        throw new UpstreamError('对话内容为空，请重新输入。', 400);
+      }
+
+      await pipeAnthropicStream({
+        url: anthropicMessagesUrl(API_BASE),
+        apiKey: API_KEY,
+        body: {
+          model: parsed.model,
+          system: buildSystemMessage(parsed.tone),
+          messages: anthropicMessages,
+          stream: true,
+          max_tokens: MAX_OUTPUT_TOKENS,
+          temperature: parsed.temperature,
+        },
+        res,
+        signal: controller.signal,
+        providerName: 'anthropic',
+      });
+      return;
+    }
+
     const body: Record<string, unknown> = {
       model: parsed.model,
       messages: [
@@ -455,8 +673,9 @@ app.post('/api/chat', publicLimiter, dailyLimiter, async (req: Request, res: Res
       max_tokens: MAX_OUTPUT_TOKENS,
     };
 
-    // deepseek-reasoner does not support temperature.
-    if (!parsed.model.includes('reasoner')) body.temperature = parsed.temperature;
+    // The OpenAI-compatible DeepSeek reasoner does not support temperature.
+    const modelReasons = REASONING_MODELS.has(parsed.model);
+    if (!modelReasons) body.temperature = parsed.temperature;
 
     await pipeOpenAiStream({
       url: `${API_BASE}/chat/completions`,
@@ -464,8 +683,8 @@ app.post('/api/chat', publicLimiter, dailyLimiter, async (req: Request, res: Res
       body,
       res,
       signal: controller.signal,
-      includeReasoning: parsed.model.includes('reasoner'),
-      providerName: 'deepseek',
+      includeReasoning: modelReasons,
+      providerName: 'openai-compatible',
     });
   } catch (error) {
     if (clientGone) return;
@@ -529,9 +748,9 @@ const server = app.listen(PORT, HOST, () => {
   console.log(
     [
       `墨语 running at http://${HOST}:${PORT}`,
-      `mode: ${IS_DEMO ? `demo (${DEMO_PROVIDER})` : 'live'}`,
+      `mode: ${IS_DEMO ? `demo (${DEMO_PROVIDER})` : `live (${PROVIDER})`}`,
       `models: ${MODEL_OPTIONS.map((model) => model.id).join(', ')}`,
-      !API_KEY && !IS_DEMO ? 'WARNING: DEEPSEEK_API_KEY is not configured.' : '',
+      !API_KEY && !IS_DEMO ? 'WARNING: model API key is not configured.' : '',
     ]
       .filter(Boolean)
       .join('\n'),

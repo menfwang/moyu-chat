@@ -8,18 +8,28 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
-      - key: DEEPSEEK_API_KEY
+      - key: AI_PROVIDER
+        value: anthropic
+      - key: ANTHROPIC_BASE_URL
+        value: https://api.deepseek.com/anthropic
+      - key: ANTHROPIC_API_KEY
         sync: false
-      - key: DEEPSEEK_MODEL
-        value: deepseek-chat
-      - key: DEEPSEEK_REASONER_MODEL
-        value: deepseek-reasoner
+      - key: ANTHROPIC_MODEL
+        value: deepseek-v4-pro
+      - key: ANTHROPIC_MODEL_NAME
+        value: V4 Pro
+      - key: ANTHROPIC_FAST_MODEL
+        value: deepseek-flash
+      - key: ANTHROPIC_FAST_MODEL_NAME
+        value: V4.1 Flash
       - key: DEMO_MODE
         value: auto
       - key: DEMO_PROVIDER
         value: pollinations
       - key: DEMO_MODEL
         value: openai-fast
+      - key: MAX_OUTPUT_TOKENS
+        value: "8192"
       - key: RATE_LIMIT_PER_MINUTE
         value: "12"
       - key: RATE_LIMIT_PER_DAY

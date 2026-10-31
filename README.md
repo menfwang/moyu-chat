@@ -1,6 +1,6 @@
 # 墨语 · Moyu Chat
 
-一个安静、克制、可以直接部署到公网的 AI 聊天应用。服务端代理 DeepSeek（或任何 OpenAI 兼容接口）的流式响应，API Key 不会进入浏览器；对话记录只保存在访客自己的浏览器里。
+一个安静、克制、可以直接部署到公网的 AI 聊天应用。服务端代理 DeepSeek 的 Anthropic 兼容 Messages API（也支持 OpenAI 兼容接口）的流式响应，API Key 不会进入浏览器；对话记录只保存在访客自己的浏览器里。
 
 ![墨语 · 浅色首页](docs/screenshots/home-light.png)
 
@@ -19,7 +19,8 @@
 ## 功能
 
 - 流式输出，支持 Markdown、表格、代码高亮和一键复制
-- DeepSeek Chat / Reasoner 双模型切换，推理过程可折叠查看
+- DeepSeek V4 Pro / V4.1 Flash 双模型切换，思考过程可折叠查看
+- 同时支持 Anthropic Messages API 和 OpenAI 兼容接口
 - 深色 / 浅色 / 跟随系统三种主题，移动端侧边抽屉
 - 多会话本地保存（localStorage），可删除单条或清空全部
 - 服务端代理 API Key，SSE 转发、心跳、超时与中断处理
@@ -34,7 +35,7 @@
 ```bash
 npm install
 cp .env.example .env
-# 编辑 .env，填入 DEEPSEEK_API_KEY
+# 编辑 .env，填入 ANTHROPIC_API_KEY
 npm run dev
 ```
 
@@ -50,19 +51,33 @@ npm start
 
 > 没有 API Key 也能启动：默认是本地演示模式。设置 `DEMO_PROVIDER=pollinations` 可以接入免费的公共演示接口，让预览页真的能聊天（见下方隐私说明）。
 
-## 获取 DeepSeek API Key
+## 接入 DeepSeek
 
 1. 打开 <https://platform.deepseek.com/> 注册并创建 API Key。
-2. 把 Key 写入服务器的环境变量 `DEEPSEEK_API_KEY`，不要写进前端代码或提交到 Git。
+2. 把 Key 写入服务器的环境变量 `ANTHROPIC_API_KEY`，不要写进前端代码或提交到 Git。
 3. 重启服务后，页面右上角的状态会从「演示模式」变为「在线」。
 
-模型 ID 默认是 `deepseek-chat` 和 `deepseek-reasoner`。如果你使用其他 OpenAI 兼容服务，可设置 `DEEPSEEK_BASE_URL` 和对应的模型 ID：
+当前默认使用 DeepSeek 的 Anthropic 兼容端点：
 
 ```dotenv
+AI_PROVIDER=anthropic
+ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
+ANTHROPIC_API_KEY=sk-xxxxxxxx
+ANTHROPIC_MODEL=deepseek-v4-pro
+ANTHROPIC_FAST_MODEL=deepseek-flash
+```
+
+> 模型 **ID** 必须使用接口支持的 `deepseek-v4-pro` 和 `deepseek-flash`。页面上的「V4 Pro」「V4.1 Flash」只是展示名，可通过 `ANTHROPIC_MODEL_NAME`、`ANTHROPIC_FAST_MODEL_NAME` 修改。不要填 `DeepSeek-V4.1-Flash`，接口会返回 400。
+
+如果想改用 OpenAI 兼容接口：
+
+```dotenv
+AI_PROVIDER=openai
 DEEPSEEK_BASE_URL=https://your-provider.example.com/v1
+DEEPSEEK_API_KEY=sk-xxxxxxxx
 DEEPSEEK_MODEL=your-chat-model
 DEEPSEEK_REASONER_MODEL=your-reasoner-model
-ENABLE_REASONER=false
+ENABLE_SECOND_MODEL=false
 ```
 
 ## 部署到公网
@@ -82,7 +97,7 @@ ENABLE_REASONER=false
 
 2. 登录 [Render Dashboard](https://dashboard.render.com/) → **New** → **Blueprint**。
 3. 选择这个仓库。Render 会自动读取根目录的 `render.yaml`。
-4. 在环境变量里填入 `DEEPSEEK_API_KEY`（标记为 secret），点击 **Apply / Deploy**。
+4. 在环境变量里填入 `ANTHROPIC_API_KEY`（标记为 secret），点击 **Apply / Deploy**。
 5. 等待构建完成，访问 Render 提供的 `https://<service>.onrender.com`。
 
 说明：
@@ -100,7 +115,7 @@ railway init
 railway up
 ```
 
-然后在 Railway 项目的 **Variables** 中添加 `DEEPSEEK_API_KEY`。仓库里的 `railway.json` 已配置 Dockerfile 构建和 `/api/health` 健康检查。
+然后在 Railway 项目的 **Variables** 中添加 `ANTHROPIC_API_KEY`。仓库里的 `railway.json` 已配置 Dockerfile 构建和 `/api/health` 健康检查。
 
 ### 方案 C：任意 VPS / Docker
 
@@ -108,7 +123,7 @@ railway up
 docker build -t moyu-chat .
 docker run -d --name moyu \
   -p 3000:3000 \
-  -e DEEPSEEK_API_KEY=sk-xxxxxxxx \
+  -e ANTHROPIC_API_KEY=sk-xxxxxxxx \
   --restart unless-stopped \
   moyu-chat
 ```
@@ -137,11 +152,18 @@ cloudflared tunnel --url http://127.0.0.1:8787
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `DEEPSEEK_API_KEY` | 空 | DeepSeek 或兼容服务的密钥；为空时进入演示模式 |
-| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | API 根地址 |
-| `DEEPSEEK_MODEL` | `deepseek-chat` | 普通对话模型 ID |
-| `DEEPSEEK_REASONER_MODEL` | `deepseek-reasoner` | 推理模型 ID |
-| `ENABLE_REASONER` | `true` | 设为 `false` 则只展示普通模型 |
+| `AI_PROVIDER` | 有 `ANTHROPIC_BASE_URL` 时为 `anthropic` | `anthropic` 或 `openai` |
+| `ANTHROPIC_BASE_URL` | `https://api.deepseek.com/anthropic` | Anthropic 兼容 API 根地址 |
+| `ANTHROPIC_API_KEY` | 空 | DeepSeek API Key；为空时进入演示模式 |
+| `ANTHROPIC_MODEL` | `deepseek-v4-pro` | 主模型 ID |
+| `ANTHROPIC_MODEL_NAME` | `V4 Pro` | 主模型展示名 |
+| `ANTHROPIC_FAST_MODEL` | `deepseek-flash` | 第二个模型 ID |
+| `ANTHROPIC_FAST_MODEL_NAME` | `V4.1 Flash` | 第二个模型展示名 |
+| `ENABLE_SECOND_MODEL` | `true` | 设为 `false` 只展示主模型 |
+| `DEEPSEEK_API_KEY` | 空 | 仅 `AI_PROVIDER=openai` 时使用 |
+| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | 仅 OpenAI 兼容模式使用 |
+| `DEEPSEEK_MODEL` | `deepseek-chat` | 仅 OpenAI 兼容模式使用 |
+| `DEEPSEEK_REASONER_MODEL` | `deepseek-reasoner` | 仅 OpenAI 兼容模式使用 |
 | `DEMO_MODE` | `auto` | `auto` / `on` / `off` |
 | `DEMO_PROVIDER` | `local` | `local` 本地示例；`pollinations` 公共演示接口 |
 | `DEMO_MODEL` | `openai` | 公共演示接口使用的模型 |
@@ -175,7 +197,7 @@ moyu-chat/
 - **对话不落服务器**：服务端不做数据库持久化；历史记录保存在访客浏览器。清除浏览器数据即清除对话。
 - **限流是进程内存级**：单实例足够防误用；如果横向扩容，需要换成 Redis 等共享存储，否则每个实例独立计数。
 - **公开站点仍可能被刷**：建议保留限流，必要时增加登录、Cloudflare Turnstile 或每日预算上限。`RATE_LIMIT_PER_DAY` 只限制请求次数，不限制 token 消耗。
-- **演示模式**：`DEMO_PROVIDER=pollinations` 会把对话内容发送到第三方公共接口，请勿输入敏感信息，也不建议作为正式生产后端。正式使用请配置自己的 `DEEPSEEK_API_KEY`。
+- **演示模式**：`DEMO_PROVIDER=pollinations` 会把对话内容发送到第三方公共接口，请勿输入敏感信息，也不建议作为正式生产后端。正式使用请配置自己的 `ANTHROPIC_API_KEY`。
 - **内容安全**：本项目不包含内容审核。面向公众开放时，请遵守所在地区法规和模型服务商的使用条款。
 
 ## 常见问题
@@ -190,7 +212,11 @@ moyu-chat/
 
 **可以换成 OpenAI / 其他模型吗？**
 
-可以。把 `DEEPSEEK_BASE_URL` 指向兼容 `/chat/completions` 的服务，并设置模型 ID；鉴权仍使用 `DEEPSEEK_API_KEY`。如需不同的鉴权头或请求字段，改 `server/index.ts` 里的 `pipeOpenAiStream` 调用即可。
+可以。设置 `AI_PROVIDER=openai`，把 `DEEPSEEK_BASE_URL` 指向兼容 `/chat/completions` 的服务，并设置模型 ID；鉴权使用 `DEEPSEEK_API_KEY`。如需不同的鉴权头或请求字段，改 `server/index.ts` 里的 `pipeOpenAiStream` 调用即可。
+
+**Anthropic 模式为什么同时发送 `x-api-key` 和 `Authorization`？**
+
+DeepSeek 的 Anthropic 兼容端点和标准 Anthropic 客户端的鉴权方式不完全一致。服务端同时带上两种头，兼容性更好，密钥仍然只存在于服务端。
 
 **为什么构建脚本带 `--configLoader native`？**
 
