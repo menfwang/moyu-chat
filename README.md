@@ -57,6 +57,8 @@ npm start
 2. 把 Key 写入服务器的环境变量 `ANTHROPIC_API_KEY`，不要写进前端代码或提交到 Git。
 3. 重启服务后，页面右上角的状态会从「演示模式」变为「在线」。
 
+只填 `ANTHROPIC_API_KEY` 也能启动，服务会自动识别 Anthropic 模式并使用下面的默认值。
+
 当前默认使用 DeepSeek 的 Anthropic 兼容端点：
 
 ```dotenv

@@ -26,8 +26,14 @@ type ModelOption = {
   reasoning: boolean;
 };
 
+const HAS_ANTHROPIC_CONFIG = Boolean(
+  process.env.ANTHROPIC_BASE_URL ||
+    process.env.ANTHROPIC_API_KEY ||
+    process.env.ANTHROPIC_AUTH_TOKEN,
+);
+
 const PROVIDER: Provider =
-  (process.env.AI_PROVIDER ?? (process.env.ANTHROPIC_BASE_URL ? 'anthropic' : 'openai')).toLowerCase() ===
+  (process.env.AI_PROVIDER ?? (HAS_ANTHROPIC_CONFIG ? 'anthropic' : 'openai')).toLowerCase() ===
   'anthropic'
     ? 'anthropic'
     : 'openai';
