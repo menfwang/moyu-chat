@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: moyu-chat
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
+        value: deepseek-chat
+      - key: DEEPSEEK_REASONER_MODEL
+        value: deepseek-reasoner
+      - key: DEMO_MODE
+        value: auto
+      - key: DEMO_PROVIDER
+        value: pollinations
+      - key: DEMO_MODEL
+        value: openai-fast
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "12"
+      - key: RATE_LIMIT_PER_DAY
+        value: "240"

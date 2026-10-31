@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-server
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+npm-debug.log*
+preview-*.png
+.npm-cache
+scripts
+README.md

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dist-server/
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+.npm-cache/
+.cdp-profile/
+.tmole-home/
+pinggy.log
+preview-*.png
